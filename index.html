@@ -52,6 +52,8 @@
     cursor: pointer;
   }
   button:hover { background: #c4b5fd; }
+  .ghost { margin-top: 10px; width: 100%; background: rgba(255,255,255,0.15); color: #fff; font-weight: 600; font-size: 0.9rem; }
+  .ghost:hover { background: rgba(255,255,255,0.25); }
   #status { margin: 14px 0 0; font-size: 0.85rem; opacity: 0.8; min-height: 1.2em; }
   ul { list-style: none; padding: 0; margin: 18px 0 0; }
   li {
@@ -100,6 +102,7 @@
     </form>
 
     <p id="status"></p>
+    <button id="test" type="button" class="ghost">🔔 Send a test notification now</button>
     <ul id="list"></ul>
   </div>
 
@@ -124,9 +127,9 @@
     if (!("Notification" in window)) {
       status.textContent = "Your browser doesn't support notifications, so reminders will pop up on this page instead.";
     } else if (Notification.permission === "denied") {
-      status.textContent = "Notifications are blocked. Reminders will show on this page. (Allow them in site settings to get real ones.)";
+      status.textContent = `Notifications are blocked for ${location.host}. Reminders will show on this page. (Click the icon left of the address bar → Notifications → Allow, then reload.)`;
     } else if (Notification.permission === "granted") {
-      status.textContent = "Notifications on ✅";
+      status.textContent = `Notifications on ✅ (for ${location.host})`;
     } else {
       status.textContent = "The browser will ask for permission the first time you hit Send.";
     }
@@ -183,17 +186,39 @@
     showToast.hideTimer = setTimeout(() => toast.classList.remove("show"), 5000);
   }
 
+  // Shows a system notification. Returns an error message, or null if it worked.
+  function notify(title, body, tag) {
+    if (!("Notification" in window)) return "This browser doesn't support notifications.";
+    if (Notification.permission !== "granted") {
+      updateStatus();
+      return `Notification permission is "${Notification.permission}" for ${location.host}.`;
+    }
+    try {
+      const n = new Notification(title, { body, tag });
+      n.onclick = () => { window.focus(); n.close(); };
+      n.onerror = () => {
+        status.textContent = "⚠️ The browser refused to show the notification.";
+      };
+      return null;
+    } catch (err) {
+      const msg = "⚠️ Notification failed: " + err.message;
+      status.textContent = msg;
+      console.error(err);
+      return msg;
+    }
+  }
+
+  document.getElementById("test").addEventListener("click", async () => {
+    await ensurePermission();
+    const problem = notify("🔔 Test notification", "If you can see this, notifications work!", "test");
+    showToast(problem || "Test sent. If no pop-up appeared, check Windows notification settings / Do Not Disturb.");
+  });
+
   function fire(id) {
     const item = pending.get(id);
     if (!item) return;
 
-    if ("Notification" in window && Notification.permission === "granted") {
-      const n = new Notification("⏰ Reminder", {
-        body: item.text,
-        tag: "reminder-" + id
-      });
-      n.onclick = () => { window.focus(); n.close(); };
-    }
+    notify("⏰ Reminder", item.text, "reminder-" + id);
     showToast(item.text); // also show on the page, in case the notification is hidden
 
     item.li.remove();
