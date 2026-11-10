@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>30-Second Notifier</title>
+<title>Reminder Notifier</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -28,7 +28,11 @@
   }
   h1 { margin: 0 0 4px; font-size: 1.6rem; }
   .sub { margin: 0 0 20px; opacity: 0.75; font-size: 0.95rem; }
-  form { display: flex; gap: 8px; }
+  form { display: flex; flex-direction: column; gap: 10px; }
+  .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 0.95rem; }
+  .row button { margin-left: auto; }
+  #secs { flex: 0 0 90px; width: 90px; text-align: center; }
+  .pretty { opacity: 0.7; font-size: 0.85rem; }
   input {
     flex: 1;
     padding: 12px 14px;
@@ -81,12 +85,18 @@
 </head>
 <body>
   <div class="card">
-    <h1>⏰ 30-Second Notifier</h1>
-    <p class="sub">Type something. In 30 seconds, future you gets reminded.</p>
+    <h1>⏰ Reminder Notifier</h1>
+    <p class="sub">Type something, pick a delay, and future you gets reminded.</p>
 
     <form id="form">
       <input id="text" type="text" placeholder="e.g. stop scrolling and drink water" maxlength="120" autocomplete="off" required>
-      <button type="submit">Send</button>
+      <div class="row">
+        <label for="secs">Remind me in</label>
+        <input id="secs" type="number" min="1" max="5400" step="1" value="30" required>
+        <span>seconds</span>
+        <span id="pretty" class="pretty"></span>
+        <button type="submit">Send</button>
+      </div>
     </form>
 
     <p id="status"></p>
@@ -96,10 +106,13 @@
   <div id="toast"></div>
 
 <script>
-  const DELAY_MS = 30 * 1000;
+  const MIN_SECS = 1;
+  const MAX_SECS = 90 * 60; // 1h 30m cap
 
   const form = document.getElementById("form");
   const input = document.getElementById("text");
+  const secsInput = document.getElementById("secs");
+  const pretty = document.getElementById("pretty");
   const list = document.getElementById("list");
   const status = document.getElementById("status");
   const toast = document.getElementById("toast");
@@ -118,6 +131,41 @@
       status.textContent = "The browser will ask for permission the first time you hit Send.";
     }
   }
+
+  // 75 -> "1m 15s", 5400 -> "1h 30m"
+  function humanize(totalSecs) {
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = totalSecs % 60;
+    const parts = [];
+    if (h) parts.push(h + "h");
+    if (m) parts.push(m + "m");
+    if (s || parts.length === 0) parts.push(s + "s");
+    return parts.join(" ");
+  }
+
+  // Countdown format: 45 -> "45s", 754 -> "12:34", 3725 -> "1:02:05"
+  function clock(totalSecs) {
+    if (totalSecs < 60) return totalSecs + "s";
+    const h = Math.floor(totalSecs / 3600);
+    const m = Math.floor((totalSecs % 3600) / 60);
+    const s = String(totalSecs % 60).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+  }
+
+  function readSeconds() {
+    const n = Math.floor(Number(secsInput.value));
+    if (!Number.isFinite(n) || n < MIN_SECS || n > MAX_SECS) return null;
+    return n;
+  }
+
+  function updatePretty() {
+    const n = readSeconds();
+    pretty.textContent = n === null
+      ? `(pick 1–${MAX_SECS})`
+      : n >= 60 ? `= ${humanize(n)}` : "";
+  }
+  secsInput.addEventListener("input", updatePretty);
 
   async function ensurePermission() {
     if (!("Notification" in window)) return false;
@@ -165,6 +213,14 @@
     const text = input.value.trim();
     if (!text) return;
 
+    const secs = readSeconds();
+    if (secs === null) {
+      showToast(`Pick a delay between ${MIN_SECS} second and ${humanize(MAX_SECS)}.`);
+      secsInput.focus();
+      return;
+    }
+    const delayMs = secs * 1000;
+
     await ensurePermission();
 
     const id = nextId++;
@@ -184,8 +240,8 @@
 
     pending.set(id, {
       text,
-      dueAt: Date.now() + DELAY_MS,
-      timeoutId: setTimeout(() => fire(id), DELAY_MS),
+      dueAt: Date.now() + delayMs,
+      timeoutId: setTimeout(() => fire(id), delayMs),
       li
     });
 
@@ -197,14 +253,16 @@
   // Countdown display, based on real time so it stays accurate even if the tab is in the background
   function tick() {
     const now = Date.now();
-    for (const item of pending.values()) {
+    for (const [id, item] of pending) {
+      if (now >= item.dueAt) { fire(id); continue; } // backup in case the timeout was delayed
       const secs = Math.max(0, Math.ceil((item.dueAt - now) / 1000));
-      item.li.querySelector(".time").textContent = secs + "s";
+      item.li.querySelector(".time").textContent = clock(secs);
     }
   }
   setInterval(tick, 250);
 
   updateStatus();
+  updatePretty();
 </script>
 </body>
 </html>
