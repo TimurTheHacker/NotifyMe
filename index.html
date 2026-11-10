@@ -187,7 +187,10 @@
   }
 
   // Shows a system notification. Returns an error message, or null if it worked.
-  function notify(title, body, tag) {
+  // Every notification gets a unique tag. Reusing a tag makes the browser silently
+  // replace the old notification instead of popping up a new one.
+  function notify(title, body) {
+    const tag = "n-" + Date.now() + "-" + Math.random().toString(36).slice(2);
     if (!("Notification" in window)) return "This browser doesn't support notifications.";
     if (Notification.permission !== "granted") {
       updateStatus();
@@ -210,7 +213,7 @@
 
   document.getElementById("test").addEventListener("click", async () => {
     await ensurePermission();
-    const problem = notify("🔔 Test notification", "If you can see this, notifications work!", "test");
+    const problem = notify("🔔 Test notification", "If you can see this, notifications work!");
     showToast(problem || "Test sent. If no pop-up appeared, check Windows notification settings / Do Not Disturb.");
   });
 
@@ -218,7 +221,7 @@
     const item = pending.get(id);
     if (!item) return;
 
-    notify("⏰ Reminder", item.text, "reminder-" + id);
+    notify("⏰ Reminder", item.text);
     showToast(item.text); // also show on the page, in case the notification is hidden
 
     item.li.remove();
