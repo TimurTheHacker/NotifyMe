@@ -1,1 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>30-Second Notifier</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: linear-gradient(135deg, #1e1b4b, #4c1d95);
+    color: #f5f3ff;
+    padding: 20px;
+  }
+  .card {
+    width: 100%;
+    max-width: 440px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 18px;
+    padding: 28px;
+    backdrop-filter: blur(8px);
+  }
+  h1 { margin: 0 0 4px; font-size: 1.6rem; }
+  .sub { margin: 0 0 20px; opacity: 0.75; font-size: 0.95rem; }
+  form { display: flex; gap: 8px; }
+  input {
+    flex: 1;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: none;
+    font-size: 1rem;
+    outline: none;
+  }
+  button {
+    padding: 12px 16px;
+    border: none;
+    border-radius: 10px;
+    background: #a78bfa;
+    color: #1e1b4b;
+    font-weight: 700;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  button:hover { background: #c4b5fd; }
+  #status { margin: 14px 0 0; font-size: 0.85rem; opacity: 0.8; min-height: 1.2em; }
+  ul { list-style: none; padding: 0; margin: 18px 0 0; }
+  li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+  }
+  li .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  li .time { font-variant-numeric: tabular-nums; font-weight: 700; color: #c4b5fd; }
+  li button { padding: 4px 9px; font-size: 0.8rem; background: rgba(255,255,255,0.2); color: #fff; }
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(150%);
+    background: #fff;
+    color: #1e1b4b;
+    padding: 14px 20px;
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    transition: transform 0.35s ease;
+    max-width: 90vw;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>⏰ 30-Second Notifier</h1>
+    <p class="sub">Type something. In 30 seconds, future you gets reminded.</p>
 
+    <form id="form">
+      <input id="text" type="text" placeholder="e.g. stop scrolling and drink water" maxlength="120" autocomplete="off" required>
+      <button type="submit">Send</button>
+    </form>
+
+    <p id="status"></p>
+    <ul id="list"></ul>
+  </div>
+
+  <div id="toast"></div>
+
+<script>
+  const DELAY_MS = 30 * 1000;
+
+  const form = document.getElementById("form");
+  const input = document.getElementById("text");
+  const list = document.getElementById("list");
+  const status = document.getElementById("status");
+  const toast = document.getElementById("toast");
+
+  const pending = new Map(); // id -> { text, dueAt, timeoutId, li }
+  let nextId = 1;
+
+  function updateStatus() {
+    if (!("Notification" in window)) {
+      status.textContent = "Your browser doesn't support notifications, so reminders will pop up on this page instead.";
+    } else if (Notification.permission === "denied") {
+      status.textContent = "Notifications are blocked. Reminders will show on this page. (Allow them in site settings to get real ones.)";
+    } else if (Notification.permission === "granted") {
+      status.textContent = "Notifications on ✅";
+    } else {
+      status.textContent = "The browser will ask for permission the first time you hit Send.";
+    }
+  }
+
+  async function ensurePermission() {
+    if (!("Notification" in window)) return false;
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+      updateStatus();
+    }
+    return Notification.permission === "granted";
+  }
+
+  function showToast(text) {
+    toast.textContent = "🔔 " + text;
+    toast.classList.add("show");
+    clearTimeout(showToast.hideTimer);
+    showToast.hideTimer = setTimeout(() => toast.classList.remove("show"), 5000);
+  }
+
+  function fire(id) {
+    const item = pending.get(id);
+    if (!item) return;
+
+    if ("Notification" in window && Notification.permission === "granted") {
+      const n = new Notification("⏰ Reminder", {
+        body: item.text,
+        tag: "reminder-" + id
+      });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+    showToast(item.text); // also show on the page, in case the notification is hidden
+
+    item.li.remove();
+    pending.delete(id);
+  }
+
+  function cancel(id) {
+    const item = pending.get(id);
+    if (!item) return;
+    clearTimeout(item.timeoutId);
+    item.li.remove();
+    pending.delete(id);
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.trim();
+    if (!text) return;
+
+    await ensurePermission();
+
+    const id = nextId++;
+    const li = document.createElement("li");
+    const msg = document.createElement("span");
+    msg.className = "msg";
+    msg.textContent = text;
+    const time = document.createElement("span");
+    time.className = "time";
+    const cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "✕";
+    cancelBtn.title = "Cancel";
+    cancelBtn.addEventListener("click", () => cancel(id));
+
+    li.append(msg, time, cancelBtn);
+    list.prepend(li);
+
+    pending.set(id, {
+      text,
+      dueAt: Date.now() + DELAY_MS,
+      timeoutId: setTimeout(() => fire(id), DELAY_MS),
+      li
+    });
+
+    input.value = "";
+    input.focus();
+    tick();
+  });
+
+  // Countdown display, based on real time so it stays accurate even if the tab is in the background
+  function tick() {
+    const now = Date.now();
+    for (const item of pending.values()) {
+      const secs = Math.max(0, Math.ceil((item.dueAt - now) / 1000));
+      item.li.querySelector(".time").textContent = secs + "s";
+    }
+  }
+  setInterval(tick, 250);
+
+  updateStatus();
+</script>
+</body>
+</html>
